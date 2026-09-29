@@ -1,0 +1,30 @@
+name = "elmellybarber"
+main = "worker.js"
+compatibility_date = "2026-09-10"
+
+# Páginas estáticas (/reservar/, /gestion/), logo, service worker y manifiestos.
+# Solo /api/* pasa primero por el Worker.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# Base de datos D1: sin database_id a propósito. Cloudflare la crea sola en el primer deploy
+# (aprovisionamiento automático) y la deja vinculada. Las tablas las crea el Worker al primer uso.
+[[d1_databases]]
+binding = "DB"
+
+# Recordatorios automáticos: se ejecuta cada 5 minutos.
+[triggers]
+crons = ["*/5 * * * *"]
+
+[vars]
+VAPID_SUBJECT = "mailto:contacto@elmellybarber.com"
+# VAPID_PUBLIC_KEY  -> variable (ver README.md)
+# VAPID_PRIVATE_KEY -> secreto:  npx wrangler secret put VAPID_PRIVATE_KEY
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
