@@ -1,0 +1,7 @@
+/reservar/*
+  Cache-Control: no-cache
+/gestion/*
+  Cache-Control: no-cache
+  X-Robots-Tag: noindex, nofollow
+/sw.js
+  Cache-Control: no-cache
