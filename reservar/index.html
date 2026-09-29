@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="es" data-role="client">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<title>ElMellyBarber · Reservá tu turno</title>
+<link rel="manifest" href="/manifest-reservar.webmanifest">
+<link rel="icon" type="image/png" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ElMellyBarber">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<main class="wrap">
+  <header class="bar">
+    <span class="who">Juan Ceballos · Barbero</span>
+    <button class="glassbtn" onclick="showNotifications()" aria-label="Avisos"><span id="bellIco"></span><i id="noteBadge" class="badge hidden">0</i></button>
+  </header>
+  <div id="app"></div>
+</main>
+<div id="toast" class="toast"></div>
+<script src="/common.js"></script>
+<script>
+$('bellIco').innerHTML=ico('bell');
+let data,sel={service:null,date:null,time:null,name:'',wa:''},clientWA='',clientNotes=[],times=[],timesRequest=0;
+try{clientWA=formatWA(localStorage.getItem('em_whatsapp')||'')}catch(e){}
+const keepWA=wa=>{try{localStorage.setItem('em_whatsapp',wa)}catch(e){}};
+const dateParts=date=>{const d=new Date(date+'T12:00:00');return{day:d.toLocaleDateString('es-AR',{weekday:'short'}).replace('.',''),num:d.getDate(),month:d.toLocaleDateString('es-AR',{month:'short'}).replace('.','')}};
+const back=(fn,label)=>`<button class="btn ghost sm" style="margin:6px 0 0 -8px" onclick="${fn}">${ico('chevL')} ${label}</button>`;
+
+function setProgress(){const ok=sel.name.trim()&&formatWA(sel.wa||clientWA).length===13,n=(sel.service?1:0)+(sel.service&&sel.date?1:0)+(sel.service&&sel.time?1:0)+(sel.service&&sel.time&&ok?1:0);document.querySelectorAll('.steps i').forEach((x,i)=>x.classList.toggle('on',i<Math.max(1,n)))}
+
+async function start(){
+  try{data=await api('/public');if(!sel.date)sel.date=data.today;renderBooking();if(clientWA)loadNotifications(clientWA);if(sel.service)await refreshTimes()}
+  catch(e){$('app').innerHTML='<div class="group pad" style="margin-top:22px"><h2 class="h2">No se pudo cargar</h2><p class="sub" style="margin-top:6px">Revisá tu conexión y probá de nuevo en unos segundos.</p><button class="btn primary" onclick="start()">Reintentar</button></div>'}
+}
+
+function serviceRow(s){
+  const on=sel.service?.id===s.id;
+  return `<button class="svc ${on?'on':''}" data-service-id="${esc(s.id)}" onclick="pickService('${esc(s.id)}')"><span class="ic">${ico('scissors')}</span><span class="main"><b>${esc(s.name)}</b><small>${durationText(s.duration)}</small></span><span class="pr">${fmt(s.price)}</span><span class="ck">${ico('check')}</span></button>`;
+}
+
+function renderBooking(){
+  setProgress();
+  const t0=new Date(data.today+'T12:00:00'),days=[0,1,2].map(i=>{const d=new Date(t0);d.setDate(d.getDate()+i);return d});
+  const dateHtml=days.map((d,i)=>{const key=d.toLocaleDateString('en-CA'),p=dateParts(key),label=i===0?'Hoy':i===1?'Mañana':'Pasado';
+    return `<button class="${sel.date===key?'on':''}" data-date="${key}" onclick="pickDate('${key}')"><b>${label}</b><small>${p.day} ${p.num}</small></button>`}).join('');
+  const svc=(data.services||[]).map(serviceRow).join('');
+  $('app').innerHTML=`
+  <section class="hero"><div class="halo"><img src="/logo.webp" alt="ElMellyBarber"></div><h1>ElMellyBarber</h1><p>Reservá tu turno con Juan Ceballos</p></section>
+  <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
+  <section class="sec"><div class="sechead"><b>Servicio</b><span>Elegí uno</span></div><div class="group">${svc||'<div class="empty">No hay servicios disponibles por ahora.</div>'}</div></section>
+  <section class="sec"><div class="sechead"><b>Día</b><span id="dayHint">${sel.service?'Horarios según el servicio':'Primero elegí un servicio'}</span></div><div class="seg" id="dates">${dateHtml}</div></section>
+  <section class="sec"><div class="sechead"><b>Horario</b><span>${sel.date?(p=>`${p.day} ${p.num} ${p.month}`)(dateParts(sel.date)):''}</span></div><div class="group pad" id="timeCard"><p class="status">${sel.service?'Cargando horarios…':'Elegí un servicio para ver los horarios.'}</p></div></section>
+  <section class="sec"><div class="sechead"><b>Tus datos</b><span>Solo lo necesario</span></div><div class="group pad ${sel.time?'':'locked'}">
+    <div class="field" style="margin-top:0"><label for="name">Nombre</label><input id="name" autocomplete="name" placeholder="Tu nombre" value="${esc(sel.name)}" ${sel.time?'':'disabled'} oninput="sel.name=this.value;updateSummary()"></div>
+    <div class="field"><label for="wa">WhatsApp</label><div class="pair"><input class="prefix" value="+54 9" disabled aria-label="Prefijo"><input id="wa" inputmode="tel" autocomplete="tel" placeholder="2477 201614" value="${esc(clientWA?displayWA(clientWA).replace(/^\+54 9 /,''):sel.wa)}" ${sel.time?'':'disabled'} oninput="sel.wa=this.value;updateSummary()"></div><p class="hint">Ingresá tu número local, sin +54 9.</p></div>
+    <div class="note-warn">${ico('clock')}<span>Si cancelás con menos de 1 hora de anticipación, se notificará a Juan Ceballos para el posterior abono del 50% del valor del servicio.</span></div>
+    <div id="formError" class="err"></div></div></section>
+  <div id="summary"></div>
+  <button class="btn" onclick="myTurns()">${ico('cal')} Ver mis turnos</button>`;
+  updateSummary();if(sel.service&&sel.date)refreshTimes();
+}
+
+function pickService(id){
+  sel.service=data.services.find(s=>s.id===id)||null;sel.time=null;
+  document.querySelectorAll('.svc').forEach(el=>el.classList.toggle('on',el.dataset.serviceId===id));
+  if($('dayHint'))$('dayHint').textContent='Horarios según el servicio';
+  updateSummary();refreshTimes();$('timeCard')?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function pickDate(date){
+  sel.date=date;sel.time=null;
+  document.querySelectorAll('#dates button').forEach(el=>el.classList.toggle('on',el.dataset.date===date));
+  refreshTimes();updateSummary();if(sel.service)$('timeCard')?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+async function refreshTimes(){
+  if(!sel.service||!sel.date)return;const card=$('timeCard');if(!card)return;
+  const rid=++timesRequest,rd=sel.date,rs=sel.service.id;
+  card.innerHTML='<p class="status">Buscando horarios disponibles…</p>';
+  try{const x=await api(`/availability?date=${encodeURIComponent(rd)}&service=${encodeURIComponent(rs)}`);
+    if(rid!==timesRequest||sel.date!==rd||sel.service?.id!==rs)return;times=x.times||[];renderTimes();updateSummary()}
+  catch(e){if(rid===timesRequest)card.innerHTML='<p class="status">No se pudieron cargar los horarios. Probá de nuevo.</p>'}
+}
+function renderTimes(){
+  const card=$('timeCard');if(!card)return;
+  const m=times.filter(t=>+t.slice(0,2)<13),a=times.filter(t=>+t.slice(0,2)>=13);
+  const g=(title,arr)=>arr.length?`<div class="tgroup"><div class="small">${title}</div><div class="times">${arr.map(t=>`<button class="time ${sel.time===t?'on':''}" onclick="pickTime('${t}')">${t}</button>`).join('')}</div></div>`:'';
+  card.innerHTML=times.length?g('Mañana',m)+g('Tarde',a):'<p class="status">No quedan horarios disponibles ese día con este servicio.</p>';
+}
+function pickTime(t){
+  sel.time=t;renderTimes();
+  ['name','wa'].forEach(i=>{const el=$(i);if(el){el.disabled=false;el.closest('.group')?.classList.remove('locked')}});
+  updateSummary();$('summary')?.scrollIntoView({behavior:'smooth',block:'center'});
+}
+function updateSummary(){
+  const el=$('summary');if(!el)return;setProgress();
+  if(!sel.service||!sel.date||!sel.time){
+    el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu resumen</span><b>${sel.service?'Falta elegir horario':'Elegí servicio, día y horario'}</b></div><span class="pr">${sel.service?fmt(sel.service.price):'—'}</span></div></div>`;return}
+  const valid=sel.name.trim()&&formatWA(sel.wa||clientWA).length===13,p=dateParts(sel.date);
+  el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu turno</span><b>${esc(sel.service.name)}</b></div><span class="pr">${fmt(sel.service.price)}</span></div>
+  <div class="pills"><span class="pill">${ico('cal')} ${p.day} ${p.num} ${p.month}</span><span class="pill">${ico('clock')} ${esc(sel.time)}</span><span class="pill">${durationText(sel.service.duration)}</span></div>
+  <button class="btn primary" onclick="reviewAndBook()" ${valid?'':'disabled'}>Confirmar turno</button>
+  <div class="hint">${valid?'Revisá los datos y confirmá.':'Completá nombre y WhatsApp para confirmar.'}</div></div>`;
+}
+async function reviewAndBook(){
+  const name=($('name')?.value||sel.name||'').trim(),wa=formatWA($('wa')?.value||sel.wa||clientWA),err=$('formError');
+  if(!name||wa.length!==13){if(err)err.textContent='Completá tu nombre y un WhatsApp argentino válido.';return}
+  sel.name=name;sel.wa=wa;clientWA=wa;keepWA(wa);
+  const btn=document.querySelector('.dock .primary');if(btn){btn.disabled=true;btn.textContent='Confirmando…'}
+  try{const r=await post('/book',{service:sel.service.id,date:sel.date,time:sel.time,name,whatsapp:wa});await loadNotifications(wa);showSuccess(r)}
+  catch(e){if(err)err.textContent=e.data?.error||e.message;if(btn){btn.disabled=false;btn.textContent='Confirmar turno'}}
+}
+function showSuccess(r){
+  window.scrollTo({top:0});
+  $('app').innerHTML=`<section class="center" style="margin-top:14px"><div class="okmark">${ico('check')}</div><h1 class="title" style="margin:6px 0 4px">¡Listo, ${esc(sel.name.trim().split(/\s+/)[0])}!</h1><p class="sub">Tu turno quedó registrado con Juan Ceballos.</p>
+  <div class="ticket"><div class="trow"><span>Servicio</span><b>${esc(r.service)}</b></div><div class="trow"><span>Fecha</span><b>${esc(longDate(r.date))}</b></div><div class="trow"><span>Hora</span><b>${esc(r.time)}</b></div><div class="trow"><span>Duración</span><b>${durationText(r.duration)}</b></div><div class="trow"><span>Precio</span><b>${fmt(r.price)}</b></div></div>
+  <div class="place"><div>${ico('pin')} ${esc(r.address)}</div><div>${ico('phone')} ${esc(r.phone)}</div><div class="small" style="margin-top:6px">Guardá esta pantalla como comprobante de tu reserva.</div></div>
+  <div class="pushSlot" data-kind="banner" style="margin-top:14px;text-align:left"></div>
+  <button class="btn primary" onclick="myTurns()">Ver mis turnos</button><button class="btn" onclick="resetAndStart()">Reservar otro turno</button></section>`;
+  window.pushRefreshUI&&pushRefreshUI();
+}
+function resetAndStart(){sel={service:null,date:data?.today||null,time:null,name:'',wa:''};start()}
+
+async function myTurns(waArg){
+  let wa=waArg||clientWA;
+  if(!wa){const v=await promptD('Ingresá tu número de WhatsApp sin +54 9','','2477 201614');if(!v)return;wa=formatWA(v)}else wa=formatWA(wa);
+  if(wa.length!==13){alertD('Ingresá un WhatsApp argentino válido.');return}
+  clientWA=wa;keepWA(wa);
+  try{
+    const r=await api('/my-appointments?whatsapp='+encodeURIComponent(wa));await loadNotifications(wa);
+    const list=r.appointments.map(a=>`<div class="ticket" style="margin-top:0;margin-bottom:12px"><div class="trow"><span>Servicio</span><b>${esc(a.service_name)}</b></div><div class="trow"><span>Fecha</span><b>${esc(longDate(a.date))}</b></div><div class="trow"><span>Hora</span><b>${esc(String(a.time).slice(0,5))}</b></div><div class="trow"><span>Precio</span><b>${fmt(a.price)}</b></div><button class="btn danger" style="margin:4px 0 12px" onclick="cancelTurn('${a.id}','${wa}')">Cancelar turno</button></div>`).join('');
+    $('app').innerHTML=`${back('start()','Reservar')}<h1 class="title">Mis turnos</h1><p class="sub" style="margin:-8px 0 16px">Turnos pendientes asociados a tu WhatsApp.</p>${list||'<div class="group"><div class="empty"><b>Sin turnos pendientes</b>No encontramos turnos con ese WhatsApp.</div></div>'}<div class="place">${ico('pin')} ${esc(r.address)}<br>${ico('phone')} ${esc(r.phone)}</div>`;
+  }catch(e){alertD(e.message)}
+}
+async function loadNotifications(wa){
+  try{const r=await api('/client-notifications?whatsapp='+encodeURIComponent(wa));clientNotes=r.notifications||[];const b=$('noteBadge'),n=clientNotes.filter(x=>!x.seen).length;if(b){b.textContent=n;b.classList.toggle('hidden',!n)}}
+  catch(e){clientNotes=[];$('noteBadge')?.classList.add('hidden')}
+}
+async function showNotifications(){
+  if(!clientWA){alertD('Primero ingresá tu WhatsApp para recibir avisos.\n\nLo podés hacer al reservar tu turno o desde “Ver mis turnos”.');return}
+  await loadNotifications(clientWA);
+  $('app').innerHTML=`${back('start()','Reservar')}<h1 class="title">Avisos</h1><div class="pushSlot" data-kind="card"></div>
+  <div class="group">${clientNotes.length?clientNotes.map(n=>`<div class="note ${n.seen?'read':''}"><b>${esc(n.title)}</b><p>${esc(n.body)}</p>${n.seen?'<small class="small">Visto</small>':`<button class="btn sm" style="margin-top:10px" onclick="readNotification('${n.id}')">Marcar como visto</button>`}</div>`).join(''):'<div class="empty"><b>Sin avisos</b>Acá vas a ver novedades sobre tus turnos.</div>'}</div>`;
+  window.pushRefreshUI&&pushRefreshUI();
+}
+async function readNotification(id){try{await post('/client-notifications/read',{whatsapp:clientWA,id});await showNotifications()}catch(e){alertD(e.message)}}
+async function cancelTurn(id,wa){
+  let r0;try{r0=await api('/my-appointments?whatsapp='+encodeURIComponent(wa))}catch(e){alertD(e.message);return}
+  const a=r0.appointments.find(x=>x.id===id);if(!a)return;
+  const ap=new Date(String(a.date).slice(0,10)+'T'+String(a.time).slice(0,5)+':00-03:00'),late=(ap-Date.now())<3600000;
+  const ok=late?await confirmD('Estás cancelando con menos de 1 hora de anticipación. Se notificará a Juan Ceballos para el posterior abono del 50% del valor del servicio. ¿Confirmás la cancelación?','Cancelar turno',true):await confirmD('¿Querés cancelar este turno?','Cancelar turno',true);
+  if(!ok)return;
+  try{const r=await post('/cancel',{id,whatsapp:wa});toast(r.late?'Turno cancelado. Se avisó a Juan.':'Turno cancelado');await myTurns(wa)}catch(e){alertD(e.message)}
+}
+start();
+</script>
+<script src="/push.js"></script>
+</body>
+</html>
