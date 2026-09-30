@@ -183,10 +183,14 @@ async function saveSchedule(){
 }
 function editService(id){
   const x=id?D.services.find(s=>s.id===id):{name:'',price:0,duration:30,online:true,addon:false};
-  showSheet(`<h2>${id?'Editar':'Nuevo'} servicio</h2><div class="field"><label for="sn">Nombre</label><input id="sn" value="${esc(x.name)}"></div><div class="two"><div class="field"><label for="sp">Precio</label><input id="sp" type="number" inputmode="numeric" value="${x.price}"></div><div class="field"><label for="sd">Duración (min)</label><input id="sd" type="number" inputmode="numeric" value="${x.duration}"></div></div><label class="check-row"><input id="so" type="checkbox" ${x.online?'checked':''}> Reservable online</label><label class="check-row"><input id="sa" type="checkbox" ${x.addon?'checked':''}> Es un adicional (opcional, se suma a otro servicio)</label>${saveBtn(`saveService('${id}')`)}`);
+  showSheet(`<h2>${id?'Editar':'Nuevo'} servicio</h2><div class="field"><label for="sn">Nombre</label><input id="sn" value="${esc(x.name)}"></div><div class="two"><div class="field"><label for="sp">Precio</label><input id="sp" type="number" inputmode="numeric" value="${x.price}"></div><div class="field"><label for="sd">Duración (min)</label><input id="sd" type="number" inputmode="numeric" value="${x.duration}"></div></div><label class="check-row"><input id="so" type="checkbox" ${x.online?'checked':''}> Reservable online</label><label class="check-row"><input id="sa" type="checkbox" ${x.addon?'checked':''}> Es un adicional (opcional, se suma a otro servicio)</label>${saveBtn(`saveService('${id}')`)}${id?`<button class="btn danger" onclick="deleteService('${id}')">${ico('x')} Eliminar servicio</button>`:''}`);
 }
 async function saveService(id){
   try{await post('/admin/service',{id:id||null,name:$('sn').value.trim(),price:Number($('sp').value),duration:Number($('sd').value),online:$('so').checked,addon:$('sa').checked});closeSheet();D=await api('/admin');render();toast('Servicio guardado')}catch(e){alertD(e.message)}
+}
+async function deleteService(id){
+  if(!await confirmD('¿Eliminar este servicio? Los turnos pasados conservan su registro. Si está en alguna promoción, se quita de ella.','Eliminar',true))return;
+  try{await post('/admin/service/delete',{id});closeSheet();D=await api('/admin');render();toast('Servicio eliminado')}catch(e){alertD(e.message)}
 }
 function editSettings(){showSheet(`<h2>Datos del local</h2><div class="field"><label for="address">Dirección</label><input id="address" value="${esc(D.settings.address)}"></div><div class="field"><label for="phone">Teléfono</label><input id="phone" value="${esc(D.settings.phone)}" inputmode="tel"></div>${saveBtn('saveSettings()')}`)}
 async function saveSettings(){try{await post('/admin/settings',{address:$('address').value,phone:$('phone').value});closeSheet();D=await api('/admin');render();toast('Datos guardados')}catch(e){alertD(e.message)}}
