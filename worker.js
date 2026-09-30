@@ -286,9 +286,10 @@ async function dbInit(db){
     try{
       await db.batch(SERVICES.map(s=>db.prepare('INSERT INTO em_services(id,name,price,duration,online) VALUES(?,?,?,?,1)').bind(...s)));
     }catch(e){ if(!isDupError(e)) throw e; }
+    // Adicional opcional que se suma a otro servicio (Juan puede editar precio y duración desde Gestión).
+    // Solo se crea junto con los servicios iniciales, para que no reaparezca si se elimina.
+    await db.prepare("INSERT OR IGNORE INTO em_services(id,name,price,duration,online,addon) VALUES('s_alisado','Alisado',15000,60,1,1)").run();
   }
-  // Adicional opcional que se suma a otro servicio (Juan puede editar precio y duración desde Gestión).
-  await db.prepare("INSERT OR IGNORE INTO em_services(id,name,price,duration,online,addon) VALUES('s_alisado','Alisado',15000,60,1,1)").run();
 }
 async function rollover(db){
   const now=today();
@@ -600,6 +601,20 @@ if(!db) return json(500,{error:'Falta configurar el binding D1 llamado DB.'});
       if(!name||name.length>80||!Number.isFinite(price)||price<0||!Number.isInteger(price)||!Number.isFinite(duration)||duration<1||duration>480||!Number.isInteger(duration))return json(400,{error:'Datos del servicio inválidos'});
       if(body.id){const existing=await service(db,body.id);if(!existing)return json(404,{error:'Servicio no encontrado'});await db.prepare('UPDATE em_services SET name=?,price=?,duration=?,online=?,addon=? WHERE id=?').bind(name,price,duration,body.online?1:0,body.addon?1:0,body.id).run();}
       else await db.prepare('INSERT INTO em_services(id,name,price,duration,online,addon) VALUES(?,?,?,?,?,?)').bind(uid('s'),name,price,duration,body.online===false?0:1,body.addon?1:0).run();
+      return json(200,{ok:true});
+    }
+    if(method==='POST'&&path==='/admin/service/delete'){
+      const id=String(body.id||'').trim();if(!id)return json(400,{error:'Servicio inválido'});
+      const existing=await service(db,id);if(!existing)return json(404,{error:'Servicio no encontrado'});
+      const total=await db.prepare('SELECT COUNT(*) AS n FROM em_services').first();if(Number(total?.n)<=1)return json(409,{error:'Tiene que quedar al menos un servicio.'});
+      const busy=await db.prepare("SELECT COUNT(*) AS n FROM em_appointments WHERE status='pending' AND (service_id=? OR addon_id=?)").bind(id,id).first();
+      if(Number(busy?.n)>0)return json(409,{error:'Hay turnos pendientes con este servicio. Cancelalos o cambialos antes de eliminarlo.'});
+      const stm=[];
+      const promos=(await db.prepare('SELECT id,service_ids FROM em_promotions').all()).results||[];
+      for(const pr of promos){let ids=[];try{ids=JSON.parse(pr.service_ids)||[]}catch{}if(!ids.includes(id))continue;const left=ids.filter(x=>x!==id);
+        stm.push(left.length?db.prepare('UPDATE em_promotions SET service_ids=? WHERE id=?').bind(JSON.stringify(left),pr.id):db.prepare('DELETE FROM em_promotions WHERE id=?').bind(pr.id));}
+      stm.push(db.prepare('DELETE FROM em_services WHERE id=?').bind(id));
+      await db.batch(stm);
       return json(200,{ok:true});
     }
     if(method==='POST'&&path==='/admin/client'){
