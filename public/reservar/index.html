@@ -14,6 +14,13 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,600;0,700;1,700;1,800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/app.css">
+<style>
+.credit{margin:34px 0 4px;text-align:center}
+.credit a{display:inline-flex;align-items:center;gap:10px;color:var(--sub);text-decoration:none;font-size:13.5px;padding:6px 10px;border-radius:12px}
+.credit a:focus-visible{outline:2px solid var(--line2);outline-offset:2px}
+.credit img{width:34px;height:34px;border-radius:9px;display:block}
+.credit b{color:var(--text);font-weight:600}
+</style>
 </head>
 <body>
 <main class="wrap">
@@ -22,6 +29,7 @@
     <button class="glassbtn" onclick="showNotifications()" aria-label="Avisos"><span id="bellIco"></span><i id="noteBadge" class="badge hidden">0</i></button>
   </header>
   <div id="app"></div>
+  <footer class="credit"><a href="https://instagram.com/modus.grid" target="_blank" rel="noopener"><img src="/modusgrid.webp" alt="Logo de modus.grid" width="34" height="34"><span>Sistema hecho por <b>@modus.grid</b></span></a></footer>
 </main>
 <div id="toast" class="toast"></div>
 <script src="/common.js"></script>
