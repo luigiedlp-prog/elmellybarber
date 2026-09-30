@@ -7,7 +7,7 @@ Sistema de turnos para la barbería, sobre Cloudflare Workers + D1.
 
 ## Qué incluye
 Agenda y gestión de turnos · registro e historial de clientes · recordatorios automáticos (aviso 1 hora antes) ·
-link de reservas · estadísticas de actividad e ingresos · panel móvil. Avisos tipo app (notificaciones push).
+link de reservas · estadísticas de actividad e ingresos · panel móvil · promociones · adicional opcional (Alisado). Avisos tipo app (notificaciones push).
 Lo que quedó fuera de esa lista está guardado en `FUTURO.md`.
 
 ## Publicar: GitHub → Cloudflare
@@ -36,6 +36,7 @@ Sin esto la página funciona igual, pero no llegan avisos.
 | Dirección | Pergamino, Buenos Aires |
 | Teléfono | +54 9 2477 233313 |
 | Servicios | Corte $10.000 (30 min) · Corte + barba $13.000 (45 min) |
+| Adicional opcional | Alisado $15.000 (60 min), se suma a otro servicio (precio y duración de ejemplo: confirmar con Juan) |
 | Horario | Lunes a sábado, 10:00 a 20:00 |
 
 ## Avisos en el celular

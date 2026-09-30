@@ -246,6 +246,7 @@ async function dbInit(db){
   // The schema is installed from schema.sql before first use. This tiny bootstrap is idempotent
   // and makes a fresh D1 database self-starting even when the schema was not imported yet.
   const statements = [
+    `CREATE TABLE IF NOT EXISTS em_promotions (id TEXT PRIMARY KEY,name TEXT NOT NULL,message TEXT NOT NULL DEFAULT '',type TEXT NOT NULL,discount_percent INTEGER NOT NULL DEFAULT 0,service_ids TEXT NOT NULL,starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`,
     `CREATE TABLE IF NOT EXISTS em_settings (id INTEGER PRIMARY KEY,address TEXT NOT NULL,phone TEXT NOT NULL,pin_hash TEXT NOT NULL,recovery_q TEXT NOT NULL,recovery_a_hash TEXT NOT NULL,schedule_json TEXT)`,
     `CREATE TABLE IF NOT EXISTS em_services (id TEXT PRIMARY KEY,name TEXT NOT NULL,price INTEGER NOT NULL,duration INTEGER NOT NULL,online INTEGER NOT NULL DEFAULT 1)`,
     `CREATE TABLE IF NOT EXISTS em_clients (id TEXT PRIMARY KEY,name TEXT NOT NULL,whatsapp TEXT UNIQUE NOT NULL,visits INTEGER NOT NULL DEFAULT 0,cancellations INTEGER NOT NULL DEFAULT 0,late_cancellations INTEGER NOT NULL DEFAULT 0,no_shows INTEGER NOT NULL DEFAULT 0,total_spent INTEGER NOT NULL DEFAULT 0,last_visit TEXT)`,
@@ -277,12 +278,17 @@ async function dbInit(db){
     }catch(e){ if(!isDupError(e)) throw e; }
   } else if(!st.schedule_json){ await db.prepare('UPDATE em_settings SET schedule_json=? WHERE id=1').bind(JSON.stringify(DEFAULTS.schedule)).run();
   }
+  for(const sql of ["ALTER TABLE em_services ADD COLUMN addon INTEGER NOT NULL DEFAULT 0","ALTER TABLE em_appointments ADD COLUMN addon_id TEXT NOT NULL DEFAULT ''"]){
+    try{await db.prepare(sql).run()}catch(e){if(!/duplicate column/i.test(String(e?.message||e)))throw e}
+  }
   const n=await db.prepare('SELECT COUNT(*) AS n FROM em_services').first();
   if(Number(n?.n||0)===0){
     try{
       await db.batch(SERVICES.map(s=>db.prepare('INSERT INTO em_services(id,name,price,duration,online) VALUES(?,?,?,?,1)').bind(...s)));
     }catch(e){ if(!isDupError(e)) throw e; }
   }
+  // Adicional opcional que se suma a otro servicio (Juan puede editar precio y duración desde Gestión).
+  await db.prepare("INSERT OR IGNORE INTO em_services(id,name,price,duration,online,addon) VALUES('s_alisado','Alisado',15000,60,1,1)").run();
 }
 async function rollover(db){
   const now=today();
@@ -307,10 +313,23 @@ async function isAdmin(req,db){
 }
 async function notify(db,kind,title,body){ await db.prepare('INSERT INTO em_notifications(id,kind,title,body) VALUES(?,?,?,?)').bind(uid('n'),kind,title,body).run(); }
 async function service(db,id){ return db.prepare('SELECT * FROM em_services WHERE id=?').bind(id).first(); }
+function parsePromotion(row){
+  if(!row)return null; let ids=[];try{ids=JSON.parse(row.service_ids||'[]')}catch{}
+  return {...row,service_ids:Array.isArray(ids)?ids:[],enabled:!!row.enabled,discount_percent:Number(row.discount_percent||0)};
+}
+function promoTimestamp(value){const v=String(value||'').trim();if(!v)return NaN;return Date.parse(/Z$|[+-]\d\d:\d\d$/.test(v)?v:`${v}:00-03:00`)}
+function promoIsActive(p,now=Date.now()){if(!p||!p.enabled)return false;const a=promoTimestamp(p.starts_at),b=promoTimestamp(p.ends_at);return Number.isFinite(a)&&Number.isFinite(b)&&a<=now&&now<b}
+function promoApplies(p,serviceId){return promoIsActive(p)&&Array.isArray(p.service_ids)&&p.service_ids.includes(serviceId)}
+function promoPrice(service,p){if(!promoApplies(p,service.id))return Number(service.price);if(p.type==='percent'){const pct=Math.max(0,Math.min(100,Number(p.discount_percent)||0));return Math.round(Number(service.price)*(100-pct)/100)}return Number(service.price)}
+async function activePromotion(db){const r=await db.prepare('SELECT * FROM em_promotions WHERE enabled=1 ORDER BY created_at DESC').all();return (r.results||[]).map(parsePromotion).find(x=>promoIsActive(x))||null}
+async function allPromotions(db){const r=await db.prepare('SELECT * FROM em_promotions ORDER BY starts_at DESC,created_at DESC').all();return (r.results||[]).map(parsePromotion)}
+
+async function addonOf(db,id,any=false){if(!id)return null;const a=await service(db,id);return a&&a.addon&&(any||a.online)?a:null}
+function combine(s,a,promo){const p=x=>promoPrice(x,promo);return {id:s.id,name:a?`${s.name} + ${a.name}`:s.name,price:p(s)+(a?p(a):0),duration:Number(s.duration)+(a?Number(a.duration):0),addon_id:a?a.id:''}}
 async function occupiedSlots(db,date){ return db.prepare('SELECT time FROM em_slots WHERE date=? ORDER BY time').bind(date).all(); }
 async function publicData(db){
-  const st=await settings(db); const sv=await db.prepare('SELECT id,name,price,duration FROM em_services WHERE online=1 ORDER BY name').all();
-  let schedule=DEFAULTS.schedule;try{if(st.schedule_json)schedule=JSON.parse(st.schedule_json)||schedule}catch{} return {address:st.address,phone:st.phone,services:sv.results,schedule,days:3,today:today()};
+  const st=await settings(db); const sv=await db.prepare('SELECT id,name,price,duration,addon FROM em_services WHERE online=1 ORDER BY addon,name').all(); const promotion=await activePromotion(db);
+  let schedule=DEFAULTS.schedule;try{if(st.schedule_json)schedule=JSON.parse(st.schedule_json)||schedule}catch{} return {address:st.address,phone:st.phone,services:sv.results,schedule,days:3,today:today(),promotion};
 }
 async function canReserve(db,date,time,duration,excludeOwner=null){
   if(!validDate(date)||!await allowedStart(db,date,time,duration)) return false;
@@ -332,7 +351,7 @@ async function canReserveAny(db,date,time,duration,excludeOwner=null){
 }
 
 async function insertAppointment(db,{id,clientId,s,date,time,status='pending',source='online',notes=''}){
-  const stm=[db.prepare(`INSERT INTO em_appointments(id,client_id,service_id,service_name,price,duration,date,time,status,source,notes) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,clientId,s.id,s.name,s.price,s.duration,date,time,status,source,notes)];
+  const stm=[db.prepare(`INSERT INTO em_appointments(id,client_id,service_id,service_name,price,duration,date,time,status,source,notes,addon_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id,clientId,s.id,s.name,s.price,s.duration,date,time,status,source,notes,s.addon_id||'')];
   for(const t of slotTimes(time,s.duration)) stm.push(db.prepare('INSERT INTO em_slots(date,time,owner_id,kind) VALUES(?,?,?,?)').bind(date,t,id,'appointment'));
   await db.batch(stm);
 }
@@ -405,31 +424,33 @@ if(!db) return json(500,{error:'Falta configurar el binding D1 llamado DB.'});
     if(method==='GET'&&path==='/availability'){
       const u=new URL(request.url),date=u.searchParams.get('date'),serviceId=u.searchParams.get('service'),exclude=u.searchParams.get('exclude');
       const s=await service(db,serviceId);
-      if(!date||!s||!s.online) return json(400,{error:'Datos inválidos'});
-      const times=await startsFor(db,date,s.duration);
+      const ad=await addonOf(db,u.searchParams.get('addon')); if(!date||!s||!s.online||s.addon||(u.searchParams.get('addon')&&!ad)) return json(400,{error:'Datos inválidos'}); const dur=combine(s,ad,null).duration;
+      const times=await startsFor(db,date,dur);
       const occupied=exclude
         ? await db.prepare('SELECT time FROM em_slots WHERE date=? AND owner_id<>? ORDER BY time').bind(date,exclude).all()
         : await occupiedSlots(db,date);
       const blocked=new Set((occupied.results||[]).map(x=>String(x.time).slice(0,5)));
-      const free=times.filter(t=>slotTimes(t,s.duration).every(x=>minutes(x)<1440&&!blocked.has(x)));
+      const free=times.filter(t=>slotTimes(t,dur).every(x=>minutes(x)<1440&&!blocked.has(x)));
       return json(200,{date,service:s.id,times:free});
     }
 
     if(method==='POST'&&path==='/book'){
       if(!(await authReserve(db,request,'book_daily',10,'-24 hours'))) return json(429,{error:'Alcanzaste el límite de turnos por día desde esta conexión. Probá de nuevo mañana o comunicate por WhatsApp.'});
-      const {service:serviceId,date,time,name,whatsapp}=body; const s=await service(db,serviceId); const wa=cleanWA(whatsapp); const finalPrice=s?Number(s.price):0;
+      const {service:serviceId,addon:addonId,date,time,name,whatsapp}=body; const s=await service(db,serviceId); const wa=cleanWA(whatsapp);
       if(!s||!s.online||!date||!time||!String(name||'').trim()||!isValidWA(wa)) return json(400,{error:'Completá todos los datos con un WhatsApp argentino válido'});
+      const ad=await addonOf(db,addonId); if(s.addon||(addonId&&!ad)) return json(400,{error:'Servicio inválido'});
+      const c=combine(s,ad,await activePromotion(db)),finalPrice=c.price;
       if(!validDate(date)) return json(400,{error:'Solo se pueden reservar hoy, mañana o pasado mañana'});
       const id=uid('a'); const cid=uid('c'); const old=await clientByWA(db,wa); const clientId=old?.id||cid;
       const stm=[];
       if(!old) stm.push(db.prepare('INSERT INTO em_clients(id,name,whatsapp) VALUES(?,?,?)').bind(clientId,String(name).trim(),wa));
       else stm.push(db.prepare('UPDATE em_clients SET name=? WHERE id=?').bind(String(name).trim(),clientId));
-      if(!await canReserve(db,date,time,s.duration)) return json(409,{error:'Ese horario ya no está disponible'});
-      stm.push(db.prepare(`INSERT INTO em_appointments(id,client_id,service_id,service_name,price,duration,date,time,status,source) VALUES(?,?,?,?,?,?,?,?,?,?)`).bind(id,clientId,s.id,s.name,finalPrice,s.duration,date,time,'pending','online'));
-      for(const t of slotTimes(time,s.duration)) stm.push(db.prepare('INSERT INTO em_slots(date,time,owner_id,kind) VALUES(?,?,?,?)').bind(date,t,id,'appointment'));
-      stm.push(db.prepare('INSERT INTO em_notifications(id,kind,title,body) VALUES(?,?,?,?)').bind(uid('n'),'booking','Nuevo turno online',`${String(name).trim()} · ${s.name} · ${date} · ${time}`));
+      if(!await canReserve(db,date,time,c.duration)) return json(409,{error:'Ese horario ya no está disponible'});
+      stm.push(db.prepare(`INSERT INTO em_appointments(id,client_id,service_id,service_name,price,duration,date,time,status,source,addon_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(id,clientId,s.id,c.name,finalPrice,c.duration,date,time,'pending','online',c.addon_id));
+      for(const t of slotTimes(time,c.duration)) stm.push(db.prepare('INSERT INTO em_slots(date,time,owner_id,kind) VALUES(?,?,?,?)').bind(date,t,id,'appointment'));
+      stm.push(db.prepare('INSERT INTO em_notifications(id,kind,title,body) VALUES(?,?,?,?)').bind(uid('n'),'booking','Nuevo turno online',`${String(name).trim()} · ${c.name} · ${date} · ${time}`));
       try { await db.batch(stm); } catch(e) { return json(409,{error:'Ese horario acaba de ser ocupado. Elegí otro.'}); }
-      const st=await settings(db); return json(200,{id,service:s.name,price:finalPrice,duration:s.duration,date,time,address:st.address,phone:st.phone});
+      const st=await settings(db); return json(200,{id,service:c.name,price:finalPrice,duration:c.duration,date,time,address:st.address,phone:st.phone});
     }
 
     if(method==='GET'&&path==='/my-appointments'){
@@ -504,24 +525,25 @@ if(!db) return json(500,{error:'Falta configurar el binding D1 llamado DB.'});
     }
     if(method==='GET'&&path==='/admin-availability'){
       const u=new URL(request.url),date=u.searchParams.get('date'),serviceId=u.searchParams.get('service'),exclude=u.searchParams.get('exclude')||null,s=await service(db,serviceId);
-      if(!date||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||!s)return json(400,{error:'Datos inválidos'});
+      if(!date||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(date)||!s||s.addon)return json(400,{error:'Datos inválidos'});
       const days=dateDiff(date,today()); if(days<0||days>365)return json(400,{error:'La fecha debe estar entre hoy y un año.'});
-      const times=await startsFor(db,date,s.duration),free=[]; const occupied=exclude ? await db.prepare('SELECT time FROM em_slots WHERE date=? AND owner_id<>?').bind(date,exclude).all() : await occupiedSlots(db,date); const blocked=new Set((occupied.results||[]).map(x=>String(x.time).slice(0,5))); for(const t of times) if(slotTimes(t,s.duration).every(x=>minutes(x)<1440&&!blocked.has(x))) free.push(t);
+      const ad=await addonOf(db,u.searchParams.get('addon'),true),dur=combine(s,ad,null).duration;const times=await startsFor(db,date,dur),free=[]; const occupied=exclude ? await db.prepare('SELECT time FROM em_slots WHERE date=? AND owner_id<>?').bind(date,exclude).all() : await occupiedSlots(db,date); const blocked=new Set((occupied.results||[]).map(x=>String(x.time).slice(0,5))); for(const t of times) if(slotTimes(t,dur).every(x=>minutes(x)<1440&&!blocked.has(x))) free.push(t);
       return json(200,{date,service:s.id,times:free});
     }
 
     if(method==='GET'&&path==='/admin'){
-      const [st,sv,ap,cl,bl,n]=await Promise.all([
+      const [st,sv,ap,cl,bl,n,promotions]=await Promise.all([
         settings(db),
-        db.prepare("SELECT id,name,price,duration,online FROM em_services ORDER BY name").all(),
+        db.prepare("SELECT id,name,price,duration,online,addon FROM em_services ORDER BY addon,name").all(),
         db.prepare(`SELECT a.*,c.name,c.whatsapp FROM em_appointments a JOIN em_clients c ON c.id=a.client_id WHERE a.date>=? ORDER BY a.date,a.time`).bind(today()).all(),
         db.prepare('SELECT * FROM em_clients ORDER BY name').all(),
         db.prepare('SELECT * FROM em_blocks WHERE date>=? ORDER BY date,start_time').bind(today()).all(),
-        db.prepare('SELECT * FROM em_notifications WHERE seen=0 ORDER BY created_at DESC').all()
+        db.prepare('SELECT * FROM em_notifications WHERE seen=0 ORDER BY created_at DESC').all(),
+        allPromotions(db)
       ]);
       let summaries=[];
       try{summaries=(await db.prepare("SELECT * FROM em_daily_summaries ORDER BY date DESC").all()).results||[]}catch(e){console.error('SUMMARY_READ_ERROR',e);}
-      let schedule=DEFAULTS.schedule;try{if(st.schedule_json)schedule=JSON.parse(st.schedule_json)||schedule}catch{} return json(200,{settings:{address:st.address,phone:st.phone,recoveryQ:st.recovery_q},services:sv.results,appointments:ap.results,clients:cl.results,blocks:bl.results,notifications:n.results,summaries,schedule,today:today()});
+      let schedule=DEFAULTS.schedule;try{if(st.schedule_json)schedule=JSON.parse(st.schedule_json)||schedule}catch{} return json(200,{settings:{address:st.address,phone:st.phone,recoveryQ:st.recovery_q},services:sv.results,appointments:ap.results,clients:cl.results,blocks:bl.results,notifications:n.results,summaries,schedule,promotions,today:today()});
     }
     if(method==='GET'&&path==='/admin/client-history'){
       const id=String(new URL(request.url).searchParams.get('id')||'');
@@ -552,11 +574,32 @@ if(!db) return json(500,{error:'Falta configurar el binding D1 llamado DB.'});
     }
     if(method==='POST'&&path==='/admin/pin'){if(!/^\d{4}$/.test(String(body.pin||'')))return json(400,{error:'El PIN debe tener 4 dígitos'});await db.prepare('UPDATE em_settings SET pin_hash=? WHERE id=1').bind(await sha256(body.pin)).run();return json(200,{ok:true});}
     if(method==='POST'&&path==='/admin/recovery'){const q=String(body.question||'').trim(),a=String(body.answer||'').trim();if(q.length<3||q.length>160||!a||a.length>120)return json(400,{error:'Completá una pregunta y una respuesta válidas'});await db.prepare('UPDATE em_settings SET recovery_q=?,recovery_a_hash=? WHERE id=1').bind(q,await sha256(a.toLowerCase())).run();return json(200,{ok:true});}
+    if(method==='POST'&&path==='/admin/promotion'){
+      const id=String(body.id||'').trim(),name=String(body.name||'').trim(),message=String(body.message||'').trim();
+      const type=String(body.type||'percent').trim(),pct=Number(body.discountPercent||0),start=String(body.startsAt||'').trim(),end=String(body.endsAt||'').trim();
+      const ids=Array.isArray(body.serviceIds)?[...new Set(body.serviceIds.map(String))]:[];
+      if(!name||name.length>120||message.length>300||!['percent','2x1'].includes(type)||!ids.length||!start||!end)return json(400,{error:'Completá nombre, servicios, tipo y vigencia de la promoción'});
+      if(type==='percent'&&(!Number.isInteger(pct)||pct<1||pct>100))return json(400,{error:'El descuento debe ser un entero entre 1 y 100'});
+      if(type==='2x1'&&pct!==0)return json(400,{error:'La promoción 2x1 no usa porcentaje de descuento'});
+      const a=promoTimestamp(start),b=promoTimestamp(end); if(!Number.isFinite(a)||!Number.isFinite(b)||a>=b)return json(400,{error:'La fecha de inicio debe ser anterior al fin'});
+      const validServices=(await db.prepare(`SELECT id FROM em_services WHERE id IN (${ids.map(()=>'?').join(',')})`).bind(...ids).all()).results||[];
+      if(validServices.length!==ids.length)return json(400,{error:'Uno o más servicios no existen'});
+      const cleanIds=validServices.map(x=>x.id),enabled=body.enabled===false?0:1,promoId=id||uid('p');
+      if(id){const existing=await db.prepare('SELECT id FROM em_promotions WHERE id=?').bind(id).first();if(!existing)return json(404,{error:'Promoción no encontrada'});await db.prepare('UPDATE em_promotions SET name=?,message=?,type=?,discount_percent=?,service_ids=?,starts_at=?,ends_at=?,enabled=? WHERE id=?').bind(name,message,type,type==='percent'?pct:0,JSON.stringify(cleanIds),start,end,enabled,id).run();}
+      else await db.prepare('INSERT INTO em_promotions(id,name,message,type,discount_percent,service_ids,starts_at,ends_at,enabled) VALUES(?,?,?,?,?,?,?,?,?)').bind(promoId,name,message,type,type==='percent'?pct:0,JSON.stringify(cleanIds),start,end,enabled).run();
+      return json(200,{ok:true,id:promoId});
+    }
+    if(method==='POST'&&path==='/admin/promotion/toggle'){
+      const id=String(body.id||'').trim();if(!id)return json(400,{error:'Promoción inválida'});const p=await db.prepare('SELECT enabled FROM em_promotions WHERE id=?').bind(id).first();if(!p)return json(404,{error:'Promoción no encontrada'});await db.prepare('UPDATE em_promotions SET enabled=? WHERE id=?').bind(Number(p.enabled)?0:1,id).run();return json(200,{ok:true,enabled:!Number(p.enabled)});
+    }
+    if(method==='POST'&&path==='/admin/promotion/delete'){
+      const id=String(body.id||'').trim();if(!id)return json(400,{error:'Promoción inválida'});await db.prepare('DELETE FROM em_promotions WHERE id=?').bind(id).run();return json(200,{ok:true});
+    }
     if(method==='POST'&&path==='/admin/service'){
       const name=String(body.name||'').trim(),price=Number(body.price),duration=Number(body.duration);
       if(!name||name.length>80||!Number.isFinite(price)||price<0||!Number.isInteger(price)||!Number.isFinite(duration)||duration<1||duration>480||!Number.isInteger(duration))return json(400,{error:'Datos del servicio inválidos'});
-      if(body.id){const existing=await service(db,body.id);if(!existing)return json(404,{error:'Servicio no encontrado'});await db.prepare('UPDATE em_services SET name=?,price=?,duration=?,online=? WHERE id=?').bind(name,price,duration,body.online?1:0,body.id).run();}
-      else await db.prepare('INSERT INTO em_services(id,name,price,duration,online) VALUES(?,?,?,?,?)').bind(uid('s'),name,price,duration,body.online===false?0:1).run();
+      if(body.id){const existing=await service(db,body.id);if(!existing)return json(404,{error:'Servicio no encontrado'});await db.prepare('UPDATE em_services SET name=?,price=?,duration=?,online=?,addon=? WHERE id=?').bind(name,price,duration,body.online?1:0,body.addon?1:0,body.id).run();}
+      else await db.prepare('INSERT INTO em_services(id,name,price,duration,online,addon) VALUES(?,?,?,?,?,?)').bind(uid('s'),name,price,duration,body.online===false?0:1,body.addon?1:0).run();
       return json(200,{ok:true});
     }
     if(method==='POST'&&path==='/admin/client'){
@@ -568,21 +611,21 @@ if(!db) return json(500,{error:'Falta configurar el binding D1 llamado DB.'});
       return json(200,{ok:true});
     }
     if(method==='POST'&&path==='/admin/appointment'){
-      const {id,clientId,date,time,serviceId,status='pending',notes=''}=body; const sv=await service(db,serviceId); if(!sv)return json(400,{error:'Servicio inválido'});
+      const {id,clientId,date,time,serviceId,status='pending',notes=''}=body; const sv=await service(db,serviceId); const ad=await addonOf(db,body.addonId,true); if(!sv||sv.addon||(body.addonId&&!ad))return json(400,{error:'Servicio inválido'}); const cb=combine(sv,ad,null);
       if(!/^\d{4}-\d{2}-\d{2}$/.test(String(date||''))||!/^\d{2}:\d{2}$/.test(String(time||''))||!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(time||'')))return json(400,{error:'Fecha u hora inválida'});
       if(status!=='pending')return json(400,{error:'Los estados se cambian desde sus acciones correspondientes'});
       if(dateDiff(date,today())<0||dateDiff(date,today())>365)return json(400,{error:'La fecha debe estar entre hoy y un año.'});
       if(id){
         const old=await db.prepare('SELECT * FROM em_appointments WHERE id=?').bind(id).first(); if(!old)return json(404,{error:'Turno no encontrado'});
         if(old.status!=='pending')return json(400,{error:'Solo se pueden editar turnos pendientes'});
-        if(!await canReserveAny(db,date,time,sv.duration,id))return json(409,{error:'Horario ocupado o fuera del horario configurado'});
-        const stm=[db.prepare('DELETE FROM em_slots WHERE owner_id=?').bind(id),db.prepare(`UPDATE em_appointments SET date=?,time=?,service_id=?,service_name=?,price=?,duration=?,status='pending',notes=? WHERE id=?`).bind(date,time,sv.id,sv.name,sv.price,sv.duration,notes,id)];
-        for(const t of slotTimes(time,sv.duration))stm.push(db.prepare('INSERT INTO em_slots(date,time,owner_id,kind) VALUES(?,?,?,?)').bind(date,t,id,'appointment'));
+        if(!await canReserveAny(db,date,time,cb.duration,id))return json(409,{error:'Horario ocupado o fuera del horario configurado'});
+        const stm=[db.prepare('DELETE FROM em_slots WHERE owner_id=?').bind(id),db.prepare(`UPDATE em_appointments SET date=?,time=?,service_id=?,service_name=?,price=?,duration=?,addon_id=?,status='pending',notes=? WHERE id=?`).bind(date,time,sv.id,cb.name,(old.service_id===sv.id&&(old.addon_id||'')===cb.addon_id)?old.price:cb.price,cb.duration,cb.addon_id,notes,id)];
+        for(const t of slotTimes(time,cb.duration))stm.push(db.prepare('INSERT INTO em_slots(date,time,owner_id,kind) VALUES(?,?,?,?)').bind(date,t,id,'appointment'));
         try{await db.batch(stm)}catch(e){return json(409,{error:'No se pudo guardar el cambio porque el horario acaba de ocuparse.'});}
         return json(200,{ok:true});
       }
-      if(!clientId||!await canReserveAny(db,date,time,sv.duration))return json(409,{error:'Horario ocupado o fuera del horario configurado'});
-      try{await insertAppointment(db,{id:uid('a'),clientId,s:sv,date,time,status:'pending',source:'manual',notes});}catch(e){return json(409,{error:'No se pudo crear el turno porque el horario acaba de ocuparse.'});}
+      if(!clientId||!await canReserveAny(db,date,time,cb.duration))return json(409,{error:'Horario ocupado o fuera del horario configurado'});
+      try{await insertAppointment(db,{id:uid('a'),clientId,s:cb,date,time,status:'pending',source:'manual',notes});}catch(e){return json(409,{error:'No se pudo crear el turno porque el horario acaba de ocuparse.'});}
       return json(200,{ok:true});
     }
     if(method==='POST'&&path==='/admin/cancel'){

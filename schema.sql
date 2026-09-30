@@ -1,8 +1,8 @@
 -- ElMellyBarber · esquema D1 (el Worker también lo crea solo la primera vez que se usa).
 CREATE TABLE IF NOT EXISTS em_settings (id INTEGER PRIMARY KEY,address TEXT NOT NULL,phone TEXT NOT NULL,pin_hash TEXT NOT NULL,recovery_q TEXT NOT NULL,recovery_a_hash TEXT NOT NULL,schedule_json TEXT);
-CREATE TABLE IF NOT EXISTS em_services (id TEXT PRIMARY KEY,name TEXT NOT NULL,price INTEGER NOT NULL,duration INTEGER NOT NULL,online INTEGER NOT NULL DEFAULT 1);
+CREATE TABLE IF NOT EXISTS em_services (id TEXT PRIMARY KEY,name TEXT NOT NULL,price INTEGER NOT NULL,duration INTEGER NOT NULL,online INTEGER NOT NULL DEFAULT 1,addon INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS em_clients (id TEXT PRIMARY KEY,name TEXT NOT NULL,whatsapp TEXT UNIQUE NOT NULL,visits INTEGER NOT NULL DEFAULT 0,cancellations INTEGER NOT NULL DEFAULT 0,late_cancellations INTEGER NOT NULL DEFAULT 0,no_shows INTEGER NOT NULL DEFAULT 0,total_spent INTEGER NOT NULL DEFAULT 0,last_visit TEXT);
-CREATE TABLE IF NOT EXISTS em_appointments (id TEXT PRIMARY KEY,client_id TEXT NOT NULL,service_id TEXT NOT NULL,service_name TEXT NOT NULL,price INTEGER NOT NULL,duration INTEGER NOT NULL,date TEXT NOT NULL,time TEXT NOT NULL,status TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'online',notes TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,cancelled_at TEXT,late_cancel INTEGER NOT NULL DEFAULT 0,cancel_source TEXT,cancel_reason TEXT,no_show_at TEXT,reminded_at TEXT);
+CREATE TABLE IF NOT EXISTS em_appointments (id TEXT PRIMARY KEY,client_id TEXT NOT NULL,service_id TEXT NOT NULL,service_name TEXT NOT NULL,price INTEGER NOT NULL,duration INTEGER NOT NULL,date TEXT NOT NULL,time TEXT NOT NULL,status TEXT NOT NULL,source TEXT NOT NULL DEFAULT 'online',notes TEXT DEFAULT '',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,cancelled_at TEXT,late_cancel INTEGER NOT NULL DEFAULT 0,cancel_source TEXT,cancel_reason TEXT,no_show_at TEXT,reminded_at TEXT,addon_id TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS em_slots (date TEXT NOT NULL,time TEXT NOT NULL,owner_id TEXT NOT NULL,kind TEXT NOT NULL,PRIMARY KEY(date,time));
 CREATE TABLE IF NOT EXISTS em_blocks (id TEXT PRIMARY KEY,date TEXT NOT NULL,start_time TEXT NOT NULL,end_time TEXT NOT NULL,whole_day INTEGER NOT NULL DEFAULT 0,reason TEXT DEFAULT '');
 CREATE TABLE IF NOT EXISTS em_notifications (id TEXT PRIMARY KEY,kind TEXT NOT NULL,title TEXT NOT NULL,body TEXT NOT NULL,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,seen INTEGER NOT NULL DEFAULT 0,pushed INTEGER NOT NULL DEFAULT 0);
@@ -18,3 +18,5 @@ CREATE INDEX IF NOT EXISTS idx_appt_client ON em_appointments(client_id,date);
 CREATE INDEX IF NOT EXISTS idx_blocks_date ON em_blocks(date);
 CREATE INDEX IF NOT EXISTS idx_notifications_seen ON em_notifications(seen,created_at);
 CREATE INDEX IF NOT EXISTS idx_push_role ON em_push_subs(role,client_id);
+
+CREATE TABLE IF NOT EXISTS em_promotions (id TEXT PRIMARY KEY,name TEXT NOT NULL,message TEXT NOT NULL DEFAULT '',type TEXT NOT NULL,discount_percent INTEGER NOT NULL DEFAULT 0,service_ids TEXT NOT NULL,starts_at TEXT NOT NULL,ends_at TEXT NOT NULL,enabled INTEGER NOT NULL DEFAULT 1,created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
