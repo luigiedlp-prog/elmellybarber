@@ -70,10 +70,10 @@ async function cancelManual(id){
 /* ── Nuevo turno / bloqueo ── */
 function fabMenu(){showSheet(`<h2>Agregar</h2><div class="group" style="margin-top:14px"><button class="lrow" onclick="newAppointment()"><span style="color:var(--red)">${ico('cal')}</span><div class="main"><b>Nuevo turno</b><small>Cargar un turno a mano</small></div><span class="chev">${ico('chev')}</span></button><button class="lrow" onclick="openBlock()"><span style="color:var(--warn)">${ico('block')}</span><div class="main"><b>Bloquear horario</b><small>Cerrar un rango o el día completo</small></div><span class="chev">${ico('chev')}</span></button></div>`)}
 async function loadManualTimes(){
-  const date=$('ad')?.value,service=$('as')?.value,exclude=window.__editId||'',box=$('atWrap');if(!date||!service||!box)return;
+  const date=$('ad')?.value,service=$('as')?.value,addon=$('aa')?.value||'',exclude=window.__editId||'',box=$('atWrap');if(!date||!service||!box)return;
   const sel=h=>`<div class="field"><label for="at">Horario disponible</label><select id="at">${h}</select></div>`;
   box.innerHTML=sel('<option>Buscando…</option>');
-  try{const r=await api(`/admin-availability?date=${encodeURIComponent(date)}&service=${encodeURIComponent(service)}${exclude?'&exclude='+encodeURIComponent(exclude):''}`);
+  try{const r=await api(`/admin-availability?date=${encodeURIComponent(date)}&service=${encodeURIComponent(service)}${addon?'&addon='+encodeURIComponent(addon):''}${exclude?'&exclude='+encodeURIComponent(exclude):''}`);
     box.innerHTML=sel(r.times.length?r.times.map(t=>`<option value="${t}" ${window.__editTime===t?'selected':''}>${t}</option>`).join(''):'<option value="">No hay horarios disponibles</option>')}
   catch(e){box.innerHTML=sel('<option value="">No se pudo cargar</option>')}
 }
@@ -81,7 +81,8 @@ function appointmentForm(a){
   const max=new Date(Date.now()+365*864e5).toISOString().slice(0,10);
   return `<h2>${a?'Editar turno':'Nuevo turno'}</h2>
   <div class="field"><label for="ac">Cliente</label><select id="ac">${D.clients.map(c=>`<option value="${c.id}" ${a&&c.id===a.client_id?'selected':''}>${esc(c.name)} · ${esc(displayWA(c.whatsapp))}</option>`).join('')}</select></div>
-  <div class="field"><label for="as">Servicio</label><select id="as" onchange="loadManualTimes()">${D.services.map(s=>`<option value="${s.id}" ${a&&s.id===a.service_id?'selected':''}>${esc(s.name)} · ${fmt(s.price)} · ${s.duration} min</option>`).join('')}</select></div>
+  <div class="field"><label for="as">Servicio</label><select id="as" onchange="loadManualTimes()">${D.services.filter(s=>!s.addon).map(s=>`<option value="${s.id}" ${a&&s.id===a.service_id?'selected':''}>${esc(s.name)} · ${fmt(s.price)} · ${s.duration} min</option>`).join('')}</select></div>
+  ${D.services.some(s=>s.addon)?`<div class="field"><label for="aa">Adicional (opcional)</label><select id="aa" onchange="loadManualTimes()"><option value="">Sin adicional</option>${D.services.filter(s=>s.addon).map(s=>`<option value="${s.id}" ${a&&a.addon_id===s.id?'selected':''}>${esc(s.name)} · +${fmt(s.price)} · +${s.duration} min</option>`).join('')}</select></div>`:''}
   <div class="field"><label for="ad">Fecha</label><input id="ad" type="date" min="${D.today}" max="${max}" value="${a?String(a.date).slice(0,10):(selectedDate||D.today)}" onchange="loadManualTimes()"></div>
   <div id="atWrap"></div>
   <div class="field"><label for="an">Nota (opcional)</label><textarea id="an" placeholder="Ej.: pidió cambio de horario">${esc(a?.notes||'')}</textarea></div>
@@ -93,7 +94,7 @@ function newAppointment(){
 }
 function editAppointment(id){const a=D.appointments.find(x=>x.id===id);if(!a||a.status!=='pending')return;window.__editId=id;window.__editTime=String(a.time).slice(0,5);showSheet(appointmentForm(a));loadManualTimes()}
 async function saveAppointment(id){
-  try{await post('/admin/appointment',{id:id||null,clientId:$('ac').value,date:$('ad').value,time:$('at').value,serviceId:$('as').value,status:'pending',notes:$('an').value});
+  try{await post('/admin/appointment',{id:id||null,clientId:$('ac').value,date:$('ad').value,time:$('at').value,serviceId:$('as').value,addonId:$('aa')?.value||'',status:'pending',notes:$('an').value});
     const d=$('ad').value;closeSheet();D=await api('/admin');selectedDate=d;render();toast(id?'Turno actualizado':'Turno creado')}catch(e){alertD(e.message)}
 }
 function openBlock(){
@@ -166,7 +167,8 @@ function settings(){
     return `<div class="sched"><b>${n}</b><div><div class="f"><input id="s${k}a" type="time" value="${a[0]||''}" aria-label="${n} desde"><span class="muted">a</span><input id="s${k}b" type="time" value="${a[1]||''}" aria-label="${n} hasta"></div><div class="f"><input id="s${k}c" type="time" value="${b[0]||''}" aria-label="${n} segunda franja desde"><span class="muted">a</span><input id="s${k}d" type="time" value="${b[1]||''}" aria-label="${n} segunda franja hasta"></div></div></div>`}).join('');
   $('servicios').innerHTML=`<h1 class="title">Servicios</h1>
   <div class="sechead"><b>Tu link de reservas</b></div><div class="group pad"><div class="linkbox">${ico('link')}<span>${esc(link)}</span></div><p class="hint">Compartilo por WhatsApp o Instagram para que tus clientes pidan turno solos.</p><div class="two"><button class="btn" onclick="copyLink()">${ico('copy')} Copiar</button><button class="btn primary" onclick="shareLink()">${ico('share')} Compartir</button></div></div>
-  <div class="sec"><div class="sechead"><b>Servicios</b><span>${D.services.length}</span></div><div class="group">${D.services.map(x=>`<button class="lrow" onclick="editService('${x.id}')"><span style="color:var(--red)">${ico('scissors')}</span><div class="main"><b>${esc(x.name)}</b><small>${x.duration} min · ${x.online?'Reservable online':'Solo cargado por vos'}</small></div><b>${fmt(x.price)}</b><span class="chev">${ico('chev')}</span></button>`).join('')||'<div class="empty">No hay servicios.</div>'}</div><button class="btn" onclick="editService('')">${ico('plus')} Agregar servicio</button></div>
+  <div class="sec"><div class="sechead"><b>Servicios</b><span>${D.services.length}</span></div><div class="group">${D.services.map(x=>`<button class="lrow" onclick="editService('${x.id}')"><span style="color:var(--red)">${ico('scissors')}</span><div class="main"><b>${esc(x.name)}</b><small>${x.addon?'Adicional · ':''}${x.duration} min · ${x.online?'Reservable online':'Solo cargado por vos'}</small></div><b>${fmt(x.price)}</b><span class="chev">${ico('chev')}</span></button>`).join('')||'<div class="empty">No hay servicios.</div>'}</div><button class="btn" onclick="editService('')">${ico('plus')} Agregar servicio</button></div>
+  <div class="sec"><div class="sechead"><b>Promociones</b><span>${(D.promotions||[]).length}</span></div>${(D.promotions||[]).map(promotionCard).join('')||'<div class="group"><div class="empty"><b>Sin promociones</b>Creá una para mostrarla a tus clientes al reservar.</div></div>'}<button class="btn" onclick="editPromotion('')">${ico('tag')} Nueva promoción</button></div>
   <div class="sec"><div class="sechead"><b>Avisos</b></div><div class="pushSlot" data-kind="card"></div></div>
   <div class="sec"><div class="sechead"><b>Local</b></div><div class="group"><div class="lrow"><span style="color:var(--red)">${ico('pin')}</span><div class="main"><small>Dirección</small><b>${esc(s.address)}</b></div></div><div class="lrow"><span style="color:var(--red)">${ico('phone')}</span><div class="main"><small>Teléfono</small><b>${esc(s.phone)}</b></div></div></div><button class="btn" onclick="editSettings()">${ico('edit')} Editar datos</button></div>
   <div class="sec"><div class="sechead"><b>Horarios de atención</b></div><div class="group pad">${rows}<p class="hint">Dejá ambos campos vacíos para cerrar ese día. La segunda franja es opcional.</p><p class="hint">Los turnos se generan desde acá, cada 15 minutos. La hora “hasta” es el último turno que se puede reservar.</p>${saveBtn('saveSchedule()','Guardar horarios')}</div></div>
@@ -180,11 +182,11 @@ async function saveSchedule(){
     await post('/admin/schedule',{schedule:sc});D=await api('/admin');toast('Horarios guardados');settings()}catch(e){alertD(e.message)}
 }
 function editService(id){
-  const x=id?D.services.find(s=>s.id===id):{name:'',price:0,duration:30,online:true};
-  showSheet(`<h2>${id?'Editar':'Nuevo'} servicio</h2><div class="field"><label for="sn">Nombre</label><input id="sn" value="${esc(x.name)}"></div><div class="two"><div class="field"><label for="sp">Precio</label><input id="sp" type="number" inputmode="numeric" value="${x.price}"></div><div class="field"><label for="sd">Duración (min)</label><input id="sd" type="number" inputmode="numeric" value="${x.duration}"></div></div><label class="check-row"><input id="so" type="checkbox" ${x.online?'checked':''}> Reservable online</label>${saveBtn(`saveService('${id}')`)}`);
+  const x=id?D.services.find(s=>s.id===id):{name:'',price:0,duration:30,online:true,addon:false};
+  showSheet(`<h2>${id?'Editar':'Nuevo'} servicio</h2><div class="field"><label for="sn">Nombre</label><input id="sn" value="${esc(x.name)}"></div><div class="two"><div class="field"><label for="sp">Precio</label><input id="sp" type="number" inputmode="numeric" value="${x.price}"></div><div class="field"><label for="sd">Duración (min)</label><input id="sd" type="number" inputmode="numeric" value="${x.duration}"></div></div><label class="check-row"><input id="so" type="checkbox" ${x.online?'checked':''}> Reservable online</label><label class="check-row"><input id="sa" type="checkbox" ${x.addon?'checked':''}> Es un adicional (opcional, se suma a otro servicio)</label>${saveBtn(`saveService('${id}')`)}`);
 }
 async function saveService(id){
-  try{await post('/admin/service',{id:id||null,name:$('sn').value.trim(),price:Number($('sp').value),duration:Number($('sd').value),online:$('so').checked});closeSheet();D=await api('/admin');render();toast('Servicio guardado')}catch(e){alertD(e.message)}
+  try{await post('/admin/service',{id:id||null,name:$('sn').value.trim(),price:Number($('sp').value),duration:Number($('sd').value),online:$('so').checked,addon:$('sa').checked});closeSheet();D=await api('/admin');render();toast('Servicio guardado')}catch(e){alertD(e.message)}
 }
 function editSettings(){showSheet(`<h2>Datos del local</h2><div class="field"><label for="address">Dirección</label><input id="address" value="${esc(D.settings.address)}"></div><div class="field"><label for="phone">Teléfono</label><input id="phone" value="${esc(D.settings.phone)}" inputmode="tel"></div>${saveBtn('saveSettings()')}`)}
 async function saveSettings(){try{await post('/admin/settings',{address:$('address').value,phone:$('phone').value});closeSheet();D=await api('/admin');render();toast('Datos guardados')}catch(e){alertD(e.message)}}
@@ -192,6 +194,36 @@ function changePin(){showSheet(`<h2>Cambiar PIN</h2><div class="field"><label fo
 async function savePin(){const p=$('cpin').value;if(!/^\d{4}$/.test(p))return alertD('El PIN debe tener 4 dígitos.');try{await post('/admin/pin',{pin:p});closeSheet();toast('PIN cambiado')}catch(e){alertD(e.message)}}
 function changeRecovery(){showSheet(`<h2>Recuperación</h2><p class="sub">Sirve para recuperar el PIN si lo olvidás.</p><div class="field"><label for="rq">Pregunta</label><input id="rq" value="${esc(D.settings.recoveryQ)}"></div><div class="field"><label for="ra">Respuesta</label><input id="ra" autocomplete="off"></div>${saveBtn('saveRecovery()')}`)}
 async function saveRecovery(){try{await post('/admin/recovery',{question:$('rq').value,answer:$('ra').value});closeSheet();D=await api('/admin');render();toast('Recuperación actualizada')}catch(e){alertD(e.message)}}
+
+/* ── Promociones ── */
+const ptime=v=>{const s=String(v||'').trim();return /Z$|[+-]\d\d:\d\d$/.test(s)?Date.parse(s):Date.parse(s+':00-03:00')};
+const fmtDT=v=>{const d=new Date(String(v).slice(0,16));return isNaN(d)?String(v):d.toLocaleString('es-AR',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})};
+function promotionStatus(p){const a=ptime(p.starts_at),b=ptime(p.ends_at),n=Date.now();return p.enabled&&a<=n&&n<b?'Activa ahora':p.enabled?(n>=b?'Terminada':'Programada'):'Pausada'}
+const promoServicesText=p=>(p.service_ids||[]).map(id=>D.services.find(s=>s.id===id)?.name).filter(Boolean).join(' · ')||'Sin servicios';
+function promotionCard(p){
+  const st=promotionStatus(p),live=st==='Activa ahora',badge=p.type==='2x1'?'2×1':Number(p.discount_percent)+'% OFF';
+  return `<div class="promo-card ${live?'live':''}"><div class="pc-top"><span class="pc-badge">${badge}</span><span class="tag ${live?'done':p.enabled?'pending':'cancelled'}">${st}</span></div><b class="pc-name">${esc(p.name)}</b>${p.message?`<p class="pc-msg">${esc(p.message)}</p>`:''}<small class="small">${esc(promoServicesText(p))}</small><small class="small">${esc(fmtDT(p.starts_at))} → ${esc(fmtDT(p.ends_at))}</small><div class="evacts" style="grid-template-columns:repeat(3,1fr)"><button onclick="editPromotion('${p.id}')">${ico('edit')} Editar</button><button onclick="togglePromotion('${p.id}')">${p.enabled?'Pausar':'Activar'}</button><button class="bad" onclick="deletePromotion('${p.id}')">${ico('x')} Borrar</button></div></div>`;
+}
+function editPromotion(id){
+  const p=id?(D.promotions||[]).find(x=>x.id===id):null,e=new Date(D.today+'T12:00:00');e.setDate(e.getDate()+6);
+  const type=p?.type||'percent',start=p?.starts_at||`${D.today}T00:00`,end=p?.ends_at||`${e.toISOString().slice(0,10)}T23:59`,ids=new Set(p?.service_ids||[]);
+  showSheet(`<h2>${p?'Editar':'Nueva'} promoción</h2>
+  <div class="field"><label for="pn">Nombre</label><input id="pn" maxlength="120" value="${esc(p?.name||'')}" placeholder="Ej.: Promo de primavera"></div>
+  <div class="field"><label for="pm">Mensaje para el cliente (opcional)</label><input id="pm" maxlength="300" value="${esc(p?.message||'')}" placeholder="Ej.: Válida hasta el domingo"></div>
+  <div class="two"><div class="field"><label for="pt">Tipo</label><select id="pt" onchange="promoTypeChanged()"><option value="percent" ${type==='percent'?'selected':''}>Descuento %</option><option value="2x1" ${type==='2x1'?'selected':''}>2×1</option></select></div><div class="field"><label for="pp">% de descuento</label><input id="pp" type="number" inputmode="numeric" min="1" max="100" value="${type==='2x1'?0:(p?.discount_percent||10)}" ${type==='2x1'?'disabled':''}></div></div>
+  <div class="field"><label>Servicios incluidos</label><div class="group pad" style="padding:6px 14px">${D.services.map(s=>`<label class="check-row" style="margin:10px 0"><input class="promoSvc" type="checkbox" value="${s.id}" ${ids.has(s.id)?'checked':''}> ${esc(s.name)}${s.addon?' (adicional)':''}</label>`).join('')}</div></div>
+  <div class="field"><label for="ps">Desde (hora de Argentina)</label><input id="ps" type="datetime-local" value="${esc(start)}"></div>
+  <div class="field"><label for="pe">Hasta</label><input id="pe" type="datetime-local" value="${esc(end)}"></div>
+  <label class="check-row"><input id="pen" type="checkbox" ${p?.enabled===false?'':'checked'}> Promoción habilitada</label>${saveBtn(`savePromotion('${id||''}')`)}`);
+}
+function promoTypeChanged(){const is2=$('pt').value==='2x1';$('pp').disabled=is2;if(is2)$('pp').value=0;else if(!Number($('pp').value))$('pp').value=10}
+async function savePromotion(id){
+  try{const ids=[...document.querySelectorAll('.promoSvc:checked')].map(x=>x.value);if(!ids.length)throw new Error('Elegí al menos un servicio.');
+    const type=$('pt').value;await post('/admin/promotion',{id:id||null,name:$('pn').value.trim(),message:$('pm').value.trim(),type,discountPercent:type==='2x1'?0:Number($('pp').value),serviceIds:ids,startsAt:$('ps').value,endsAt:$('pe').value,enabled:$('pen').checked});
+    closeSheet();D=await api('/admin');render();toast('Promoción guardada')}catch(e){alertD(e.message)}
+}
+async function togglePromotion(id){try{await post('/admin/promotion/toggle',{id});D=await api('/admin');render();toast('Promoción actualizada')}catch(e){alertD(e.message)}}
+async function deletePromotion(id){if(!await confirmD('¿Eliminar esta promoción?','Eliminar',true))return;try{await post('/admin/promotion/delete',{id});D=await api('/admin');render();toast('Promoción eliminada')}catch(e){alertD(e.message)}}
 
 /* ── Avisos ── */
 function notifications(){
