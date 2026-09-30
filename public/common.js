@@ -34,9 +34,11 @@ block:'<circle cx="12" cy="12" r="9"/><path d="m5.6 5.6 12.8 12.8"/>',
 noshow:'<circle cx="10" cy="8" r="3.5"/><path d="M3.5 20c0-3.6 2.9-6 6.5-6"/><path d="m15.5 15.5 5 5M20.5 15.5l-5 5"/>',
 lock:'<rect x="5" y="11" width="14" height="10" rx="2.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 out:'<path d="M9 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h3M16 8l4 4-4 4M20 12H9"/>',
+spark:'<path d="M11 3l1.9 5.6L18.5 10.5l-5.6 1.9L11 18l-1.9-5.6L3.5 10.5l5.6-1.9Z"/><path d="M19 15.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8Z"/>',
+tag:'<path d="M3 12V4h8l10 10-8 8Z"/><circle cx="7.5" cy="8.5" r="1.2"/>',
 wa:'<path d="M4 20l1.3-4.2A8 8 0 1 1 8.4 18.8L4 20Z"/>'
 };
-const FILLED=new Set(['bell','cal','clock','users','chart','pin','lock','copy','block','noshow','phone','wa','scissors','check_c']);
+const FILLED=new Set(['bell','cal','clock','users','chart','pin','lock','copy','block','noshow','phone','wa','scissors','spark','tag']);
 W.ico=n=>`<svg class="i${FILLED.has(n)?' f':''}" viewBox="0 0 24 24" aria-hidden="true">${IC[n]||''}</svg>`;
 
 /* WhatsApp argentino */

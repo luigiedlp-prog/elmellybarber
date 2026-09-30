@@ -242,3 +242,20 @@ body::after{background:radial-gradient(closest-side,rgba(47,107,255,.10),transpa
 .seg button.on{box-shadow:0 0 0 1px rgba(255,69,58,.7),0 0 18px var(--glow-soft)}
 .check-row input{accent-color:var(--red)}
 .linkbox{color:#cfe0ff}.linkbox svg.i{color:var(--blue)}
+
+/* Promociones y adicional */
+.promo{position:relative;overflow:hidden;display:flex;align-items:center;gap:14px;margin-top:16px;padding:16px 16px 14px;border-radius:var(--r);background:linear-gradient(135deg,rgba(255,69,58,.22),rgba(47,107,255,.16));border:1px solid rgba(205,215,240,.25);box-shadow:0 0 34px var(--glow-soft)}
+.promo::before{content:"";position:absolute;left:0;right:0;top:0;height:4px;background:var(--pole);background-size:30px 100%}
+.promo .bd,.pc-badge{flex:none;min-width:64px;padding:8px 10px;border-radius:12px;background:linear-gradient(180deg,#ff5a4f,#c81f17);color:#fff;text-align:center;font:italic 800 24px/1 var(--display);letter-spacing:.5px;box-shadow:0 0 20px var(--glow)}
+.promo b{display:block;font-size:17px;font-weight:650}.promo span.m{display:block;color:#d6d9e6;font-size:14px;margin-top:2px}
+.svc .was{color:var(--dim);text-decoration:line-through;font-size:16px;margin-right:6px}
+.svc .pt{display:block;width:max-content;margin:3px 0 1px;padding:1px 7px;border-radius:6px;background:var(--tint);color:#ff8c84;font:italic 800 13px/1.5 var(--display);letter-spacing:.5px;vertical-align:1px}
+.svc.addon .ic{color:var(--red);background:var(--tint)}
+.svc.addon.locked{opacity:.5}
+.svc.addon.on .ic{background:var(--red);color:#fff}
+.svc .ck.sq{border-radius:8px}
+.promo-card{position:relative;padding:16px;border-radius:var(--r);background:var(--card);border:1px solid var(--line);margin-bottom:12px}
+.promo-card.live{border-color:rgba(255,69,58,.6);box-shadow:0 0 30px var(--glow-soft)}
+.pc-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.pc-name{display:block;font-size:18px;font-weight:650}.pc-msg{color:var(--sub);font-size:14.5px;margin:2px 0 6px}
+.promo-card small{display:block;margin-top:2px}
