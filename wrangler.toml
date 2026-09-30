@@ -19,7 +19,7 @@ binding = "DB"
 crons = ["*/5 * * * *"]
 
 [vars]
-VAPID_SUBJECT = "mailto:contacto@elmellybarber.com"
+VAPID_SUBJECT = "mailto:modusgirdelmellybarber@gmail.com"
 # VAPID_PUBLIC_KEY  -> variable (ver README.md)
 # VAPID_PRIVATE_KEY -> secreto:  npx wrangler secret put VAPID_PRIVATE_KEY
 
