@@ -27,12 +27,19 @@
 <script src="/common.js"></script>
 <script>
 $('bellIco').innerHTML=ico('bell');
-let data,sel={service:null,date:null,time:null,name:'',wa:''},clientWA='',clientNotes=[],times=[],timesRequest=0;
+let data,sel={service:null,addon:null,date:null,time:null,name:'',wa:''},clientWA='',clientNotes=[],times=[],timesRequest=0;
 try{clientWA=formatWA(localStorage.getItem('em_whatsapp')||'')}catch(e){}
 const keepWA=wa=>{try{localStorage.setItem('em_whatsapp',wa)}catch(e){}};
 const dateParts=date=>{const d=new Date(date+'T12:00:00');return{day:d.toLocaleDateString('es-AR',{weekday:'short'}).replace('.',''),num:d.getDate(),month:d.toLocaleDateString('es-AR',{month:'short'}).replace('.','')}};
 const back=(fn,label)=>`<button class="btn ghost sm" style="margin:6px 0 0 -8px" onclick="${fn}">${ico('chevL')} ${label}</button>`;
 
+const promoOn=s=>{const p=data.promotion;return p&&Array.isArray(p.service_ids)&&p.service_ids.includes(s.id)?p:null};
+const unit=s=>{const p=promoOn(s);return p&&p.type==='percent'?Math.round(Number(s.price)*(100-Number(p.discount_percent||0))/100):Number(s.price)};
+const totalPrice=()=>sel.service?unit(sel.service)+(sel.addon?unit(sel.addon):0):0;
+const totalDur=()=>sel.service?Number(sel.service.duration)+(sel.addon?Number(sel.addon.duration):0):0;
+const comboName=()=>sel.service?sel.service.name+(sel.addon?' + '+sel.addon.name:''):'';
+const badgeText=p=>p.type==='2x1'?'2×1':Number(p.discount_percent)+'% OFF';
+const priceHtml=(s,plus)=>{const u=unit(s),o=Number(s.price);return `<span class="pr">${u!==o?`<s class="was">${fmt(o)}</s>`:''}${plus?'+':''}${fmt(u)}</span>`};
 function setProgress(){const ok=sel.name.trim()&&formatWA(sel.wa||clientWA).length===13,n=(sel.service?1:0)+(sel.service&&sel.date?1:0)+(sel.service&&sel.time?1:0)+(sel.service&&sel.time&&ok?1:0);document.querySelectorAll('.steps i').forEach((x,i)=>x.classList.toggle('on',i<Math.max(1,n)))}
 
 async function start(){
@@ -42,7 +49,17 @@ async function start(){
 
 function serviceRow(s){
   const on=sel.service?.id===s.id;
-  return `<button class="svc ${on?'on':''}" data-service-id="${esc(s.id)}" onclick="pickService('${esc(s.id)}')"><span class="ic">${ico('scissors')}</span><span class="main"><b>${esc(s.name)}</b><small>${durationText(s.duration)}</small></span><span class="pr">${fmt(s.price)}</span><span class="ck">${ico('check')}</span></button>`;
+  return `<button class="svc ${on?'on':''}" data-service-id="${esc(s.id)}" onclick="pickService('${esc(s.id)}')"><span class="ic">${ico('scissors')}</span><span class="main"><b>${esc(s.name)}${promoOn(s)?`<span class="pt">${esc(badgeText(promoOn(s)))}</span>`:''}</b><small>${durationText(s.duration)}</small></span>${priceHtml(s)}<span class="ck">${ico('check')}</span></button>`;
+}
+function addonRow(s){
+  const on=sel.addon?.id===s.id;
+  return `<button class="svc addon ${on?'on':''} ${sel.service?'':'locked'}" data-addon-id="${esc(s.id)}" onclick="toggleAddon('${esc(s.id)}')"><span class="ic">${ico('spark')}</span><span class="main"><b>${esc(s.name)}${promoOn(s)?`<span class="pt">${esc(badgeText(promoOn(s)))}</span>`:''}</b><small>+${durationText(s.duration)} · se suma a tu servicio</small></span>${priceHtml(s,true)}<span class="ck sq">${ico('check')}</span></button>`;
+}
+function toggleAddon(id){
+  if(!sel.service){toast('Primero elegí un servicio');return}
+  sel.addon=sel.addon?.id===id?null:(data.services.find(s=>s.id===id)||null);sel.time=null;
+  document.querySelectorAll('.svc.addon').forEach(el=>el.classList.toggle('on',el.dataset.addonId===sel.addon?.id));
+  updateSummary();refreshTimes();
 }
 
 function renderBooking(){
@@ -50,11 +67,13 @@ function renderBooking(){
   const t0=new Date(data.today+'T12:00:00'),days=[0,1,2].map(i=>{const d=new Date(t0);d.setDate(d.getDate()+i);return d});
   const dateHtml=days.map((d,i)=>{const key=d.toLocaleDateString('en-CA'),p=dateParts(key),label=i===0?'Hoy':i===1?'Mañana':'Pasado';
     return `<button class="${sel.date===key?'on':''}" data-date="${key}" onclick="pickDate('${key}')"><b>${label}</b><small>${p.day} ${p.num}</small></button>`}).join('');
-  const svc=(data.services||[]).map(serviceRow).join('');
+  const svc=(data.services||[]).filter(s=>!s.addon).map(serviceRow).join(''),adds=(data.services||[]).filter(s=>s.addon),
+    promoHtml=data.promotion?`<div class="promo"><span class="bd">${esc(badgeText(data.promotion))}</span><div><b>${esc(data.promotion.name)}</b>${data.promotion.message?`<span class="m">${esc(data.promotion.message)}</span>`:''}</div></div>`:'',
+    addHtml=adds.length?`<section class="sec"><div class="sechead"><b>Adicional</b><span>Opcional</span></div><div class="group">${adds.map(addonRow).join('')}</div></section>`:'';
   $('app').innerHTML=`
-  <section class="hero"><div class="halo"><img src="/logo.webp" alt="ElMellyBarber"></div><h1>ElMellyBarber</h1><p>Reservá tu turno con Juan Ceballos</p></section>
+  <section class="hero"><div class="halo"><img src="/logo.webp" alt="ElMellyBarber"></div><h1>ElMellyBarber</h1><p>Reservá tu turno con Juan Ceballos</p></section>${promoHtml}
   <div class="steps"><i class="on"></i><i></i><i></i><i></i></div>
-  <section class="sec"><div class="sechead"><b>Servicio</b><span>Elegí uno</span></div><div class="group">${svc||'<div class="empty">No hay servicios disponibles por ahora.</div>'}</div></section>
+  <section class="sec"><div class="sechead"><b>Servicio</b><span>Elegí uno</span></div><div class="group">${svc||'<div class="empty">No hay servicios disponibles por ahora.</div>'}</div></section>${addHtml}
   <section class="sec"><div class="sechead"><b>Día</b><span id="dayHint">${sel.service?'Horarios según el servicio':'Primero elegí un servicio'}</span></div><div class="seg" id="dates">${dateHtml}</div></section>
   <section class="sec"><div class="sechead"><b>Horario</b><span>${sel.date?(p=>`${p.day} ${p.num} ${p.month}`)(dateParts(sel.date)):''}</span></div><div class="group pad" id="timeCard"><p class="status">${sel.service?'Cargando horarios…':'Elegí un servicio para ver los horarios.'}</p></div></section>
   <section class="sec"><div class="sechead"><b>Tus datos</b><span>Solo lo necesario</span></div><div class="group pad ${sel.time?'':'locked'}">
@@ -70,6 +89,7 @@ function renderBooking(){
 function pickService(id){
   sel.service=data.services.find(s=>s.id===id)||null;sel.time=null;
   document.querySelectorAll('.svc').forEach(el=>el.classList.toggle('on',el.dataset.serviceId===id));
+  document.querySelectorAll('.svc.addon').forEach(el=>el.classList.remove('locked'));
   if($('dayHint'))$('dayHint').textContent='Horarios según el servicio';
   updateSummary();refreshTimes();$('timeCard')?.scrollIntoView({behavior:'smooth',block:'center'});
 }
@@ -80,10 +100,10 @@ function pickDate(date){
 }
 async function refreshTimes(){
   if(!sel.service||!sel.date)return;const card=$('timeCard');if(!card)return;
-  const rid=++timesRequest,rd=sel.date,rs=sel.service.id;
+  const rid=++timesRequest,rd=sel.date,rs=sel.service.id,ra=sel.addon?.id||'';
   card.innerHTML='<p class="status">Buscando horarios disponibles…</p>';
-  try{const x=await api(`/availability?date=${encodeURIComponent(rd)}&service=${encodeURIComponent(rs)}`);
-    if(rid!==timesRequest||sel.date!==rd||sel.service?.id!==rs)return;times=x.times||[];renderTimes();updateSummary()}
+  try{const x=await api(`/availability?date=${encodeURIComponent(rd)}&service=${encodeURIComponent(rs)}${ra?'&addon='+encodeURIComponent(ra):''}`);
+    if(rid!==timesRequest||sel.date!==rd||sel.service?.id!==rs||(sel.addon?.id||'')!==ra)return;times=x.times||[];renderTimes();updateSummary()}
   catch(e){if(rid===timesRequest)card.innerHTML='<p class="status">No se pudieron cargar los horarios. Probá de nuevo.</p>'}
 }
 function renderTimes(){
@@ -100,10 +120,10 @@ function pickTime(t){
 function updateSummary(){
   const el=$('summary');if(!el)return;setProgress();
   if(!sel.service||!sel.date||!sel.time){
-    el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu resumen</span><b>${sel.service?'Falta elegir horario':'Elegí servicio, día y horario'}</b></div><span class="pr">${sel.service?fmt(sel.service.price):'—'}</span></div></div>`;return}
+    el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu resumen</span><b>${sel.service?'Falta elegir horario':'Elegí servicio, día y horario'}</b></div><span class="pr">${sel.service?fmt(totalPrice()):'—'}</span></div></div>`;return}
   const valid=sel.name.trim()&&formatWA(sel.wa||clientWA).length===13,p=dateParts(sel.date);
-  el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu turno</span><b>${esc(sel.service.name)}</b></div><span class="pr">${fmt(sel.service.price)}</span></div>
-  <div class="pills"><span class="pill">${ico('cal')} ${p.day} ${p.num} ${p.month}</span><span class="pill">${ico('clock')} ${esc(sel.time)}</span><span class="pill">${durationText(sel.service.duration)}</span></div>
+  el.innerHTML=`<div class="dock"><div class="top"><div><span class="small">Tu turno</span><b>${esc(comboName())}</b></div><span class="pr">${fmt(totalPrice())}</span></div>
+  <div class="pills"><span class="pill">${ico('cal')} ${p.day} ${p.num} ${p.month}</span><span class="pill">${ico('clock')} ${esc(sel.time)}</span><span class="pill">${durationText(totalDur())}</span></div>
   <button class="btn primary" onclick="reviewAndBook()" ${valid?'':'disabled'}>Confirmar turno</button>
   <div class="hint">${valid?'Revisá los datos y confirmá.':'Completá nombre y WhatsApp para confirmar.'}</div></div>`;
 }
@@ -112,7 +132,7 @@ async function reviewAndBook(){
   if(!name||wa.length!==13){if(err)err.textContent='Completá tu nombre y un WhatsApp argentino válido.';return}
   sel.name=name;sel.wa=wa;clientWA=wa;keepWA(wa);
   const btn=document.querySelector('.dock .primary');if(btn){btn.disabled=true;btn.textContent='Confirmando…'}
-  try{const r=await post('/book',{service:sel.service.id,date:sel.date,time:sel.time,name,whatsapp:wa});await loadNotifications(wa);showSuccess(r)}
+  try{const r=await post('/book',{service:sel.service.id,addon:sel.addon?.id||'',date:sel.date,time:sel.time,name,whatsapp:wa});await loadNotifications(wa);showSuccess(r)}
   catch(e){if(err)err.textContent=e.data?.error||e.message;if(btn){btn.disabled=false;btn.textContent='Confirmar turno'}}
 }
 function showSuccess(r){
@@ -124,7 +144,7 @@ function showSuccess(r){
   <button class="btn primary" onclick="myTurns()">Ver mis turnos</button><button class="btn" onclick="resetAndStart()">Reservar otro turno</button></section>`;
   window.pushRefreshUI&&pushRefreshUI();
 }
-function resetAndStart(){sel={service:null,date:data?.today||null,time:null,name:'',wa:''};start()}
+function resetAndStart(){sel={service:null,addon:null,date:data?.today||null,time:null,name:'',wa:''};start()}
 
 async function myTurns(waArg){
   let wa=waArg||clientWA;
